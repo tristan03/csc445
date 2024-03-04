@@ -1,0 +1,25 @@
+numMessages = (int) decryptedMessage;
+
+                        for (int i = 0; i < numMessages; i++) {
+                            InetAddress clientHost = packet.getAddress();
+                            int clientPort = packet.getPort();
+                            socket.receive(packet);
+                            byte[] bytes = Arrays.copyOf(packet.getData(), packet.getLength());
+                            if (i == numMessages - 1) {
+                                System.out.println("Last message: " + BytesHandler.bytesToLong(bytes));
+                                sendAck(socket, clientHost, clientPort);
+                                System.out.println("sent ack");
+                            }
+                        }
+
+
+
+                        System.out.println("Message: " + decryptedMessage + "\n");
+
+                                                InetAddress clientHost = packet.getAddress();
+                                                int clientPort = packet.getPort();
+
+                                                System.out.println("Host: " + clientHost);
+                                                System.out.println("Port: " + clientPort);
+                                                // respond
+                                                sendBackWithUDP(decryptedMessage, byteMessage.length, socket, clientHost, clientPort);
