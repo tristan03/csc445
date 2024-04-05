@@ -1,6 +1,10 @@
 package Assignment2;
 
 /*
+    Tristan Allen
+    CSC445 Assignment2
+    Suny Oswego
+
     client program
 */
 
@@ -16,51 +20,50 @@ public class Main {
 
         java -cp bin Assignment2.Main
         java -cp bin Assignment2.Server
+
+        program is ran by:
+
+            java [program] [code] [filename] [drop-flag]
+                                                   ^
+                                  this is optional |
+
+            ex. java Assignment2.Main WRQ test.txt -d
+
+        This program using TCP-style sliding windows with TFTP
      */
 
     static int port = 3030;
     static String host = "129.3.20.3";  // moxie's ip
-    static final int WINDOW_SIZE = 4;
+    // static String host = ""; // rho's ip
+    static final int WINDOW_SIZE = 5;
 
     static Map<Integer, Boolean> ackMap = new HashMap<>();  // map to keep track of what packets have been acknowledged
+    static XorEncryption xorEncryption = new XorEncryption(1);
 
     public static void main(String[] args) {
-        System.out.print("Upload/Download: ");
-        Scanner scanner = new Scanner(System.in);
-        String input = scanner.next();
 
+//        // parse command line
+//        String opcode = args[0];   // RRQ -> download (read from server), WRQ -> upload (write to server)
+//        String filename = args[1];   // filename
+//        boolean drop = Arrays.asList(args).contains("-d");  // "-d" flag indicates dropping packets
+        String opcode = "WRQ";
+        String filename = "test.txt";
         boolean drop = false;
-//        if (args[0] != null) {
-//            if (checkPacketDrop(args[0])) {
-//                drop = true;
-//            }
-//        }
 
-        long randomNumber = getRandomLong();
-        String senderID = getRandomString(5);
+        long randomNumber = xorEncryption.getRandomLong();   // get random long for encryption
+        String senderID = getRandomSenderID();  // get unique senderID
 
-        System.out.print("Filename: ");
-        Scanner fileScanner = new Scanner(System.in);
-        String filename = fileScanner.next();
-
-        // TODO: remove and take a command line arg
-        System.out.print("Drop? ");
-        Scanner dropScanner = new Scanner(System.in);
-        String dropInput = dropScanner.next();
-        if (dropInput.equalsIgnoreCase("y")) {
-            drop = true;
-        }
-
-        if (input.equalsIgnoreCase("upload")) {
+        if (opcode.equalsIgnoreCase("WRQ")) {    // upload a file
+            int opc = 2;
             File file = FileHandler.getFile(filename);  // get desired file to upload
             if (file != null) {
-                sendWithTCP(randomNumber, senderID, drop, file);    // upload file
+                upload(randomNumber, senderID, drop, file, opc);    // upload file
             } else {
                 System.err.println(filename + " cannot be found. ");
             }
-        } else if (input.equalsIgnoreCase("download")) {
-            File file = downloadWithTCP(filename);  // download desired file
-
+        } else if (opcode.equalsIgnoreCase("RRQ")) {
+            int opc = 1;
+            File file = download(filename, drop, opc);  // download desired file
             File currentFile = null;
             try {
                 currentFile = FileHandler.getFile(filename);   // get old file
@@ -74,15 +77,14 @@ public class Main {
 
                 assert currentFileContents != null;
                 if (currentFileContents.equals(newFileContents)) {  // validate
-                    System.out.println("Valid file contents. ");
+                    System.out.println("\nValid file contents.\n");
                 }
             }
         }
     }
 
-    private static void sendWithTCP(long randomNumber, String senderID, boolean drop, File file) {
-        long key = XorShift(randomNumber);
-        XorEncryption xorEncryption = new XorEncryption(key);
+    private static void upload(long randomNumber, String senderID, boolean drop, File file, int opc) {
+        long key = xorEncryption.XorShift(randomNumber);
 
         String fileContents = FileHandler.readFile(file);
         assert fileContents != null;
@@ -94,18 +96,27 @@ public class Main {
             ackMap.put(i, false);
         }
 
+        // connect to server
         try (Socket socket = new Socket(host, port);
             ObjectOutputStream outputStream = new ObjectOutputStream(socket.getOutputStream());
             ObjectInputStream inputStream = new ObjectInputStream(socket.getInputStream())) {
 
-            outputStream.writeInt(0);   // send mode (upload)
+            String mode = "octet";
+
+            outputStream.writeInt(opc);   // send opcode
+            outputStream.writeObject(mode);    // send octet mode
             outputStream.writeObject(senderID); // send sender ID
             outputStream.writeObject(randomNumber);  // send long for decryption
             outputStream.writeInt(message.length);  // send message length
+            outputStream.writeObject(file.getName()); // send the filename
+
+            System.out.println("\n---------------------------------------------------------------\n");
+            System.out.println("Transfer sender id: " + senderID);
+            System.out.println("Uploading file: " + file.getName() + "\n");
+
+            long startTime = System.currentTimeMillis();
 
             // initialize variables
-            int totalPackets = message.length;
-            System.out.println("Total packets: " + totalPackets);
             int ackReceived = 0;
             int startPacket = -1;
 
@@ -122,19 +133,18 @@ public class Main {
 
                 // send the rest upon receiving expecting ack of packetToSend - WINDOW_SIZE
                 try {
-                    Object ack = inputStream.readObject();
+                    Object oack = inputStream.readObject();
 
                     // receive ack
-                    if (ack instanceof Integer) {
-                        ackReceived = (Integer) ack;
+                    if (oack instanceof Integer) {
+                        ackReceived = (Integer) oack;
                         updateAckMap(ackReceived);  // update the ack map (packet was acknowledged)
+                        System.out.println("Received ack for packet " + ackReceived);
                     }
 
                     int remainingPackets = message.length - ackReceived;
 
                     if (remainingPackets != 0) {
-                        System.out.println("Received ack for packet " + ackReceived);
-
                         if (remainingPackets > WINDOW_SIZE) {
                             startPacket = ackReceived + WINDOW_SIZE;  // slide window
                             System.out.println("Window slid, sending packet " + startPacket);
@@ -142,8 +152,14 @@ public class Main {
                                 byte packet = message[startPacket];
 
                                 // if the drop flag was entered, drop 1% of packets
-                                if (drop && shouldDropPacket()) {
-                                    System.out.println("Dropped packet " + startPacket);
+                                boolean shouldDrop = shouldDropPacket(message.length / 5);
+                                if (drop && shouldDrop) {
+                                    outputStream.writeObject(-1);   // -1 signalling dropped packet
+                                    System.out.println("Dropped packet " + startPacket + ". Resending... ");
+
+                                    // retrying to send
+                                    outputStream.writeObject(packet);   // rewrite the packet
+                                    System.out.println("Packet " + startPacket + " successfully sent ");
                                 } else {    // upload normally, no dropped packets
                                     outputStream.writeObject(packet);
                                 }
@@ -157,19 +173,31 @@ public class Main {
 
             } while (ackReceived != message.length - 1);
 
+            long endTime = System.currentTimeMillis();
+
             // flush and close streams
             outputStream.flush();
             outputStream.close();
             inputStream.close();
 
-            System.out.println("All packets acknowledged. (" + ackReceived + " packets)");
+            // calculate throughput
+
+            System.out.println("start time: " + startTime);
+            System.out.println("end time: " + endTime);
+            long duration = endTime - startTime;
+            double durationSeconds = duration / 1000.0;
+            double throughput = ((message.length * 8) / (durationSeconds)) / 1_000_000;
+
+
+            System.out.println("Successfully uploaded " + file.getName() + "\n");
+            System.out.println("Throughput: " + durationSeconds + " mbps\n");
 
         } catch (IOException e) {
             throw new RuntimeException(e);
         }
     }
 
-    private static File downloadWithTCP(String filename) {
+    private static File download(String filename, boolean drop, int opc) {
         try (Socket socket = new Socket(host, port);
              ObjectOutputStream outputStream = new ObjectOutputStream(socket.getOutputStream())) {
             ObjectInputStream inputStream = new ObjectInputStream(socket.getInputStream());
@@ -179,56 +207,93 @@ public class Main {
             int packetCount = 0;
             int packetToAck = 0;
 
-            outputStream.writeInt(1);   // send mode (download)
+            long startTime = System.currentTimeMillis();
+
+            outputStream.writeInt(opc);   // send opcode
             outputStream.writeObject(filename); // send filename
+            outputStream.writeObject(drop);    // send whether to drop packets or not
+
+            int status = inputStream.readInt();  // approved or denied
+
+            if (status == -1) {
+                System.err.println("[ERROR] "+ filename + " does not exist. Request denied. ");
+                System.exit(-1);
+            }
 
             String senderID = (String) inputStream.readObject();    // read senderID
+            System.out.println("\nTransfer sender id: " + senderID + "\n");
+            long randomNumber = inputStream.readLong(); // read random long for decryption
             int messageLength = inputStream.readInt();  // read message length
-            long randomNumber = inputStream.readLong();
+            String filenameFromServer = (String) inputStream.readObject();
 
             do {
+                boolean wasDropped = false;
+
                 if (packetToAck == 0) {
+
                     for (int i = 0; i < WINDOW_SIZE; i++) {
                         packet = inputStream.readObject();
-                        baos.write((byte) packet);
 
+                        if (packet instanceof Byte) {
+                            baos.write((byte) packet);
+                            System.out.println("Received packet " + packetCount);
+                            packetCount++;
+                        } else if (packet instanceof Integer) {
+                            wasDropped = true;
+                            System.out.println("Packet " + packetCount + " was dropped");
+                        }
+                    }
+
+                } else if (packetCount != messageLength){
+                    packet = inputStream.readObject();
+
+                    if (packet instanceof Byte) {
+                        baos.write((byte) packet);
                         System.out.println("Received packet " + packetCount);
                         packetCount++;
+                    } else if (packet instanceof Integer) {
+                        wasDropped = true;
+                        System.out.println("Packet " + packetCount + " was dropped");
                     }
-                } else if (packetCount != messageLength) {
-                    packet = inputStream.readObject();
-                    baos.write((byte) packet );
-                    System.out.println("Received packet " + packetCount);
-                    packetCount++;
                 }
 
-                // send ack
-                outputStream.writeObject(packetToAck);
-                System.out.println("Ack sent for packet " + packetToAck);
+                if (!wasDropped) {
+                    // send ack
+                    outputStream.writeObject(packetToAck);
+                    outputStream.flush();
+                    System.out.println("Ack sent for packet " + packetToAck);
 
-                packetToAck++;
+                    packetToAck++;
+                }
 
             } while (packetToAck != messageLength);
 
+            long endTime = System.currentTimeMillis();
+
             byte[] message = baos.toByteArray();
 
-            String filename1 = senderID + ".txt";
-
-            System.out.println(filename1);
-            System.out.println(randomNumber);
-
-            long key = XorShift(randomNumber);
+            long key = xorEncryption.XorShift(randomNumber);
             XorEncryption xorEncryption = new XorEncryption(key);
             message = xorEncryption.decrypt(message, key);
             String contents = BytesHandler.bytesToString(message);
 
-            System.out.println("File contents: " + contents + ".");
+            System.out.println("\nSuccessfully downloaded " + filenameFromServer);
+            System.out.println("File contents: " + contents + ".\n");
 
-            FileHandler.writeToFile(contents, senderID);
+            FileHandler.writeToFile(contents, filenameFromServer);
 
             outputStream.flush();
             outputStream.close();
             inputStream.close();
+
+            // calculate throughput
+            long duration = endTime - startTime;
+            double durationSeconds = duration / 1000.0;
+            double totalBits = messageLength * 8.0;
+            double totalMegaBits = totalBits / 1_000_000;
+            double throughput = totalMegaBits / durationSeconds;
+
+            System.out.println("Throughput: " + throughput + " mbps\n");
 
             return FileHandler.getFile(filename);
 
@@ -238,13 +303,13 @@ public class Main {
     }
 
     // get random string for either senderID or the file contents
-    private static String getRandomString(int length) {
+    private static String getRandomSenderID() {
         String characters = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
 
         StringBuilder sb = new StringBuilder();
         Random random = new Random();
 
-        for (int i = 0; i < length; i++) {
+        for (int i = 0; i < 10; i++) {
             int randomIndex = random.nextInt(characters.length());
             sb.append(characters.charAt(randomIndex));
         }
@@ -252,33 +317,17 @@ public class Main {
         return sb.toString();
     }
 
-    private static boolean checkPacketDrop(String arg) {
-        return arg.equalsIgnoreCase("-d");
-    }
-
     private static boolean packetWasReceived(int currentIndex) {
         int packetToCheck = currentIndex - WINDOW_SIZE;
         return ackMap.get(packetToCheck).equals(true);
     }
 
-    private static boolean shouldDropPacket() {
+    private static boolean shouldDropPacket(int maxSize) {
         Random random = new Random();
-        return random.nextInt(100) < 1;
+        return random.nextInt(maxSize) < 1;
     }
 
     private static void updateAckMap(int index) {
         ackMap.replace(index, true);
-    }
-
-    private static long getRandomLong() {
-        Random random = new Random();
-        return random.nextLong();
-    }
-
-    private static long XorShift(long r) {
-        r ^= r << 13;
-        r ^= r >>> 7;
-        r ^= r << 17;
-        return r;
     }
 }

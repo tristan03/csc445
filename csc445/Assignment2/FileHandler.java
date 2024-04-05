@@ -1,35 +1,24 @@
 package Assignment2;
 
+/*
+    Tristan Allen
+    CSC445 Assignment2
+    Suny Oswego
+
+    program to handle different file needs
+ */
+
 import java.io.File;
 import java.io.FileWriter;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Paths;
-import java.nio.file.StandardCopyOption;
 
 public class FileHandler {
 
-    public static void saveFile(File downloadedFile) {
-        String directoryPath = "src/Assignment2/data/temp/";
-        File dir = new File(directoryPath);
-        File file = new File(directoryPath, downloadedFile.getName());
+    public static void writeToFile(String content, String filename) {
         try {
-            if (!dir.exists()) {
-                dir.mkdir();
-            }
-
-            Files.copy(downloadedFile.toPath(), file.toPath(), StandardCopyOption.REPLACE_EXISTING);
-        } catch (IOException e) {
-            System.err.println("Failed to save file ");
-        }
-
-        System.out.println("File saved at " + file.getAbsolutePath());
-    }
-
-    public static void writeToFile(String content, String senderID) {
-        try {
-            String directoryPath = "src/Assignment2/data/";
-            String filename = senderID+ ".txt";
+            String directoryPath = "src/Assignment2/data/temp";
             String filepath = directoryPath + "/" + filename;
 
             File directory = new File(directoryPath);
@@ -39,7 +28,7 @@ public class FileHandler {
 
             FileWriter writer = new FileWriter(filepath);
             writer.write(content);
-            System.out.println("Successfully saved file. ");
+            System.out.println("\nSuccessfully saved file. ");
             writer.close();
 
         } catch (IOException e) {
