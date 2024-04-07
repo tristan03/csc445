@@ -1,0 +1,1 @@
+javac -d bin Client.java Server.java FileHandler.java Packet.java Ack.java Opcode.java Transferer.java XorEncryption.java BytesHandler.java
