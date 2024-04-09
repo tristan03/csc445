@@ -1,5 +1,6 @@
 package Assignment2_1;
 
+import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.nio.ByteBuffer;
@@ -39,22 +40,20 @@ public class Packet {
         try (FileOutputStream fos = new FileOutputStream(outputPath)) {
             for (int i = 0; i < buffers.size(); i++) {
                 ByteBuffer buffer = buffers.get(i);
+                if (buffer == null) continue;
 
-                int headerSize = 8;
-                buffer.position(buffer.position() + headerSize); // skip header
+                buffer.rewind();
+                int headerSize = 8; // Ensure this matches your actual header size
+                if (buffer.remaining() > headerSize) {
+                    buffer.position(headerSize);
 
-                while (buffer.hasRemaining()) {
-//                    byte b = buffer.get();
-//                    if (b == 0) {
-//                        break;
-//                    }
                     byte[] data = new byte[buffer.remaining()];
                     buffer.get(data);
-                    fos.write(data);
+                    fos.write(data); // Write all data, regardless of content
                 }
             }
         }
-        System.out.println("File saved at " + outputPath);
+        System.out.println("\nFile saved at " + outputPath);
     }
 
     public ByteBuffer toByteBuffer() {
